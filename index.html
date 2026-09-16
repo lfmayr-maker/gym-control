@@ -630,6 +630,65 @@ function tick(){
 /* ============================================================
    PERSONAL
    ============================================================ */
+
+/* ---------- carga automática de PersonalABordo.xlsx desde GitHub Pages ---------- */
+async function cargarPersonalDesdeGitHub(){
+  const archivoExcel = './PersonalABordo.xlsx';
+
+  try{
+    toast('Cargando PersonalABordo.xlsx desde GitHub...');
+
+    const response = await fetch(archivoExcel, {cache:'no-store'});
+    if(!response.ok){
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = new Uint8Array(await response.arrayBuffer());
+    const wb = XLSX.read(data, {type:'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+
+    if(rows.length===0){
+      toast('PersonalABordo.xlsx no contiene registros.','err');
+      return;
+    }
+
+    const nuevoPersonal = [];
+
+    rows.forEach(row=>{
+      const map = {};
+      Object.keys(row).forEach(k=>{ map[normKey(k)] = row[k]; });
+
+      const ficha = (map['FICHA']||'').toString().trim();
+      if(!ficha) return;
+
+      const nombre = (map['NOMBRE']||'').toString().trim();
+      const categoria = (map['CATEGORIA']||'').toString().trim();
+      const area = (map['AREA']||'').toString().trim();
+
+      nuevoPersonal.push({ficha,nombre,categoria,area});
+    });
+
+    if(nuevoPersonal.length===0){
+      toast('No se encontraron registros válidos en PersonalABordo.xlsx.','err');
+      return;
+    }
+
+    /* El Excel publicado en GitHub es la fuente del catálogo.
+       Se reemplaza el catálogo local para que cada navegador cargue
+       la misma información al abrir el sistema. */
+    personal = nuevoPersonal;
+    guardarPersonal();
+    renderPersonal();
+    renderDashboard();
+
+    toast(`PersonalABordo.xlsx cargado: ${personal.length} personas.`,'ok');
+  }catch(err){
+    console.error('Error cargando PersonalABordo.xlsx:', err);
+    toast('No se pudo cargar PersonalABordo.xlsx desde GitHub. Verifique que esté en la raíz del repositorio.','err');
+  }
+}
+
 document.getElementById('input-personal-excel').addEventListener('change', function(e){
   const file = e.target.files[0];
   if(!file) return;
@@ -853,7 +912,7 @@ document.getElementById('input-respaldo').addEventListener('change', function(e)
 /* ============================================================
    INICIO
    ============================================================ */
-function init(){
+async function init(){
   cargarDatos();
   actualizarReloj();
   renderDashboard();
@@ -861,6 +920,9 @@ function init(){
   renderBitacora();
   renderEstadisticas();
   setInterval(tick, 1000);
+
+  // Carga automáticamente el catálogo desde PersonalABordo.xlsx publicado junto al index.html
+  await cargarPersonalDesdeGitHub();
 }
 init();
 </script>
