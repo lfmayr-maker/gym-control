@@ -646,10 +646,22 @@ async function cargarPersonalDesdeGitHub(){
     const data = new Uint8Array(await response.arrayBuffer());
     const wb = XLSX.read(data, {type:'array'});
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+
+    /*
+      PersonalABordo.xlsx tiene 2 filas informativas antes de los encabezados.
+      Los encabezados reales están en la fila 3:
+      FICHA | NOMBRE | CATEGORIA | DEPTO/CIA. | AREA | ...
+
+      range: 2 hace que SheetJS use la fila 3 como encabezado.
+    */
+    const rows = XLSX.utils.sheet_to_json(ws, {
+      range: 2,
+      defval:'',
+      raw:true
+    });
 
     if(rows.length===0){
-      toast('PersonalABordo.xlsx no contiene registros.','err');
+      toast('PersonalABordo.xlsx no contiene registros después de la fila de encabezados.','err');
       return;
     }
 
@@ -670,13 +682,15 @@ async function cargarPersonalDesdeGitHub(){
     });
 
     if(nuevoPersonal.length===0){
-      toast('No se encontraron registros válidos en PersonalABordo.xlsx.','err');
+      toast('No se encontraron registros con FICHA en PersonalABordo.xlsx.','err');
       return;
     }
 
-    /* El Excel publicado en GitHub es la fuente del catálogo.
-       Se reemplaza el catálogo local para que cada navegador cargue
-       la misma información al abrir el sistema. */
+    /*
+      El Excel publicado en GitHub es la fuente del catálogo.
+      Se reemplaza el catálogo local para que cada navegador
+      cargue la misma información al abrir el sistema.
+    */
     personal = nuevoPersonal;
     guardarPersonal();
     renderPersonal();
@@ -684,8 +698,8 @@ async function cargarPersonalDesdeGitHub(){
 
     toast(`PersonalABordo.xlsx cargado: ${personal.length} personas.`,'ok');
   }catch(err){
-    console.error('Error cargando PersonalABordo.xlsx:', err);
-    toast('No se pudo cargar PersonalABordo.xlsx desde GitHub. Verifique que esté en la raíz del repositorio.','err');
+    console.error('Error cargando PersonalABordo.xlsx desde GitHub:', err);
+    toast(`Error al leer PersonalABordo.xlsx: ${err.message || err}`,'err');
   }
 }
 
