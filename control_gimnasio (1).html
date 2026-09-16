@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control de Gimnasio</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --navy-950:#0A1622;
+    --navy-900:#0F2135;
+    --navy-800:#152C45;
+    --navy-750:#1A3552;
+    --steel-600:#3E5C76;
+    --steel-500:#5B7A96;
+    --fog-100:#EDEFF2;
+    --fog-300:#AEBBC8;
+    --fog-500:#7E8FA0;
+    --amber-500:#F2A93B;
+    --amber-600:#D6900F;
+    --red-500:#E4572E;
+    --red-600:#C23D18;
+    --teal-500:#3FA796;
+    --teal-600:#2E8577;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", "Consolas", monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(circle at 15% 0%, var(--navy-900), var(--navy-950) 60%);
+    color:var(--fog-100);
+    font-family:var(--sans);
+    min-height:100vh;
+    padding-bottom:60px;
+  }
+  a{color:var(--amber-500);}
+
+  /* ===== Top bar ===== */
+  .topbar{
+    display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between;
+    gap:16px;
+    padding:20px 28px;
+    background:linear-gradient(180deg, var(--navy-900), var(--navy-950));
+    border-bottom:1px solid var(--steel-600);
+  }
+  .brand{display:flex; align-items:center; gap:14px;}
+  .brand-mark{
+    width:42px; height:42px; border-radius:8px;
+    background:conic-gradient(from 220deg, var(--teal-500), var(--amber-500), var(--red-500), var(--teal-500));
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-weight:700; color:var(--navy-950); font-size:15px;
+  }
+  .brand h1{
+    font-size:19px; letter-spacing:0.5px; margin:0; font-weight:700; color:var(--fog-100);
+  }
+  .brand p{margin:2px 0 0; font-size:12px; color:var(--fog-500);}
+  .clock{
+    display:flex; gap:22px; align-items:baseline; font-family:var(--mono);
+  }
+  .clock .date{font-size:15px; color:var(--fog-300);}
+  .clock .time{font-size:26px; color:var(--fog-100); font-weight:600;}
+
+  /* ===== Nav ===== */
+  .tabs{
+    display:flex; gap:6px; padding:14px 28px 0; flex-wrap:wrap;
+  }
+  .tab-btn{
+    background:transparent; border:1px solid var(--steel-600); color:var(--fog-300);
+    padding:9px 16px; border-radius:7px 7px 0 0; cursor:pointer; font-size:13.5px;
+    font-family:var(--sans); border-bottom:none; transition:background .15s, color .15s;
+  }
+  .tab-btn:hover{color:var(--fog-100); background:var(--navy-800);}
+  .tab-btn.active{
+    background:var(--navy-800); color:var(--fog-100); border-color:var(--steel-500);
+    font-weight:600;
+  }
+  main{
+    padding:0 28px 28px; max-width:1300px; margin:0 auto;
+  }
+  section.panel{
+    display:none; background:var(--navy-800); border:1px solid var(--steel-600);
+    border-radius:0 10px 10px 10px; padding:26px;
+  }
+  section.panel.active{display:block;}
+
+  /* ===== Dashboard / Aforo ===== */
+  .dash-grid{
+    display:grid; grid-template-columns: 1.1fr 1.4fr; gap:22px; margin-bottom:24px;
+  }
+  @media (max-width: 900px){ .dash-grid{grid-template-columns:1fr;} }
+
+  .aforo-card{
+    background:var(--navy-900); border:1px solid var(--steel-600); border-radius:10px;
+    padding:22px; display:flex; flex-direction:column; gap:14px;
+  }
+  .aforo-label{font-size:12px; letter-spacing:1.5px; color:var(--fog-500); font-weight:600;}
+  .aforo-count{font-family:var(--mono); font-size:56px; font-weight:700; line-height:1;}
+  .aforo-count.ok{color:var(--teal-500);}
+  .aforo-count.warn{color:var(--amber-500);}
+  .aforo-count.full{color:var(--red-500);}
+  .aforo-sub{font-size:13.5px; color:var(--fog-300);}
+  .berths{display:flex; gap:8px;}
+  .berth{
+    flex:1; height:14px; border-radius:3px; background:var(--navy-750);
+    border:1px solid var(--steel-600);
+  }
+  .berth.lit{background:var(--teal-500); border-color:var(--teal-500);}
+  .berth.lit.warn{background:var(--amber-500); border-color:var(--amber-500);}
+  .berth.lit.full{background:var(--red-500); border-color:var(--red-500);}
+  .aforo-flag{
+    margin-top:6px; padding:8px 12px; border-radius:6px; font-size:13px; font-weight:600;
+    text-align:center; display:none;
+  }
+  .aforo-flag.show{display:block;}
+
+  .mini-stats{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:6px;}
+  .mini-stat{background:var(--navy-750); border:1px solid var(--steel-600); border-radius:8px; padding:10px 12px;}
+  .mini-stat .n{font-family:var(--mono); font-size:20px; font-weight:700; color:var(--fog-100);}
+  .mini-stat .l{font-size:11px; color:var(--fog-500); margin-top:2px;}
+
+  /* ===== Entrada form ===== */
+  .entrada-card{
+    background:var(--navy-900); border:1px solid var(--steel-600); border-radius:10px;
+    padding:22px; display:flex; flex-direction:column; gap:12px;
+  }
+  .entrada-card h2{margin:0 0 4px; font-size:15px; letter-spacing:0.6px; color:var(--fog-300); font-weight:700;}
+  #ficha-input{
+    width:100%; font-family:var(--mono); font-size:30px; letter-spacing:2px;
+    background:var(--navy-950); border:2px solid var(--steel-600); color:var(--fog-100);
+    padding:14px 16px; border-radius:8px; text-align:center;
+  }
+  #ficha-input:focus{outline:none; border-color:var(--amber-500);}
+  #btn-entrada{
+    background:var(--teal-500); color:var(--navy-950); border:none; padding:15px;
+    font-size:16px; font-weight:700; border-radius:8px; cursor:pointer; letter-spacing:0.4px;
+  }
+  #btn-entrada:hover{background:var(--teal-600); color:var(--fog-100);}
+  #btn-entrada:disabled{background:var(--steel-600); color:var(--fog-500); cursor:not-allowed;}
+  .status-msg{
+    padding:11px 14px; border-radius:7px; font-size:14px; font-weight:600; display:none;
+  }
+  .status-msg.show{display:block;}
+  .status-msg.err{background:rgba(228,87,46,0.16); color:var(--red-500); border:1px solid var(--red-500);}
+  .status-msg.ok{background:rgba(63,167,150,0.16); color:var(--teal-500); border:1px solid var(--teal-500);}
+  .ultima-entrada{font-size:12.5px; color:var(--fog-500);}
+
+  /* ===== Personas dentro cards ===== */
+  h3.section-title{font-size:13px; letter-spacing:1px; color:var(--fog-300); font-weight:700; margin:0 0 14px;}
+  .personas-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:14px;}
+  .empty-msg{color:var(--fog-500); font-size:14px; padding:18px; text-align:center; border:1px dashed var(--steel-600); border-radius:8px;}
+  .persona-card{
+    background:var(--navy-900); border:1px solid var(--steel-600); border-radius:9px;
+    padding:16px; display:flex; flex-direction:column; gap:8px; position:relative;
+    border-left:4px solid var(--teal-500);
+  }
+  .persona-card.warn15{border-left-color:var(--amber-500);}
+  .persona-card.warn5{border-left-color:var(--red-500); box-shadow:0 0 0 1px rgba(228,87,46,0.35);}
+  .persona-card.agotado{border-left-color:var(--red-500); background:rgba(228,87,46,0.07);}
+  .p-ficha{font-family:var(--mono); font-size:12px; color:var(--fog-500);}
+  .p-nombre{font-size:15.5px; font-weight:700; color:var(--fog-100);}
+  .p-cat{font-size:12.5px; color:var(--fog-300);}
+  .p-times{display:flex; justify-content:space-between; font-size:11.5px; color:var(--fog-500); margin-top:2px;}
+  .p-countdown-label{font-size:10.5px; letter-spacing:0.8px; color:var(--fog-500); margin-top:6px;}
+  .p-countdown{font-family:var(--mono); font-size:26px; font-weight:700; color:var(--teal-500);}
+  .persona-card.warn15 .p-countdown{color:var(--amber-500);}
+  .persona-card.warn5 .p-countdown{color:var(--red-500);}
+  .persona-card.agotado .p-countdown{color:var(--red-500);}
+  .p-estado-tag{
+    font-size:10.5px; font-weight:700; letter-spacing:0.5px; padding:2px 8px; border-radius:20px;
+    display:inline-block; width:fit-content; background:rgba(228,87,46,0.18); color:var(--red-500);
+  }
+  .btn-salida{
+    margin-top:8px; background:transparent; border:1px solid var(--red-500); color:var(--red-500);
+    padding:9px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;
+  }
+  .btn-salida:hover{background:var(--red-500); color:var(--navy-950);}
+
+  /* ===== General buttons ===== */
+  .btn{
+    background:var(--navy-750); border:1px solid var(--steel-600); color:var(--fog-100);
+    padding:10px 16px; border-radius:7px; cursor:pointer; font-size:13.5px; font-weight:600;
+  }
+  .btn:hover{border-color:var(--amber-500);}
+  .btn.primary{background:var(--teal-500); color:var(--navy-950); border:none;}
+  .btn.primary:hover{background:var(--teal-600); color:var(--fog-100);}
+  .btn.danger{background:transparent; border:1px solid var(--red-500); color:var(--red-500);}
+  .btn.danger:hover{background:var(--red-500); color:var(--navy-950);}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+
+  /* ===== Personal table ===== */
+  table{width:100%; border-collapse:collapse; font-size:13.5px; margin-top:14px;}
+  th,td{padding:9px 10px; text-align:left; border-bottom:1px solid var(--steel-600);}
+  th{color:var(--fog-500); font-size:11.5px; letter-spacing:0.6px; font-weight:700;}
+  tr:hover td{background:var(--navy-750);}
+  .table-wrap{overflow-x:auto; max-height:420px; overflow-y:auto; border:1px solid var(--steel-600); border-radius:8px;}
+  input[type=file]{color:var(--fog-300); font-size:13px;}
+  input[type=text],input[type=date],select{
+    background:var(--navy-950); border:1px solid var(--steel-600); color:var(--fog-100);
+    padding:9px 12px; border-radius:6px; font-size:13.5px; font-family:var(--sans);
+  }
+  label.f-label{font-size:11.5px; color:var(--fog-500); display:block; margin-bottom:4px; letter-spacing:0.4px;}
+  .filters{display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:6px;}
+  .tag{
+    display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700;
+  }
+  .tag.ACTIVO{background:rgba(63,167,150,.18); color:var(--teal-500);}
+  .tag.FINALIZADO{background:rgba(174,187,200,.18); color:var(--fog-300);}
+  .tag.AGOTADO{background:rgba(228,87,46,.18); color:var(--red-500);}
+
+  /* ===== Estadisticas ===== */
+  .stats-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px;}
+  .stat-box{background:var(--navy-900); border:1px solid var(--steel-600); border-radius:9px; padding:18px;}
+  .stat-box .n{font-family:var(--mono); font-size:30px; font-weight:700; color:var(--fog-100);}
+  .stat-box .l{font-size:12px; color:var(--fog-500); margin-top:4px;}
+
+  .info-block{background:var(--navy-900); border:1px solid var(--steel-600); border-radius:9px; padding:18px; margin-top:18px; font-size:13.5px; color:var(--fog-300); line-height:1.6;}
+  .toast{
+    position:fixed; bottom:22px; right:22px; background:var(--navy-750); border:1px solid var(--steel-500);
+    color:var(--fog-100); padding:13px 18px; border-radius:8px; font-size:13.5px; box-shadow:0 6px 20px rgba(0,0,0,.4);
+    opacity:0; transform:translateY(10px); transition:all .25s; z-index:999; max-width:320px;
+  }
+  .toast.show{opacity:1; transform:translateY(0);}
+  .toast.err{border-color:var(--red-500); color:var(--red-500);}
+  .toast.ok{border-color:var(--teal-500); color:var(--teal-500);}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">CG</div>
+    <div>
+      <h1>CONTROL DE GIMNASIO</h1>
+      <p>Bitácora de acceso &middot; máx. 5 personas &middot; 60 min por sesión</p>
+    </div>
+  </div>
+  <div class="clock">
+    <div><div class="date" id="clock-date">--/--/----</div></div>
+    <div class="time" id="clock-time">--:--:--</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="panel">Panel principal</button>
+  <button class="tab-btn" data-tab="personal">Personal</button>
+  <button class="tab-btn" data-tab="bitacora">Bitácora</button>
+  <button class="tab-btn" data-tab="estadisticas">Estadísticas</button>
+  <button class="tab-btn" data-tab="respaldo">Respaldo</button>
+</div>
+
+<main>
+
+  <!-- ============ PANEL PRINCIPAL ============ -->
+  <section class="panel active" id="panel-panel">
+    <div class="dash-grid">
+      <div class="aforo-card">
+        <div class="aforo-label">AFORO</div>
+        <div class="aforo-count ok" id="aforo-count">0 / 5</div>
+        <div class="berths" id="berths"></div>
+        <div class="aforo-sub" id="aforo-sub">ESPACIOS DISPONIBLES: 5</div>
+        <div class="aforo-flag" id="aforo-flag">AFORO COMPLETO</div>
+        <div class="mini-stats">
+          <div class="mini-stat"><div class="n" id="mini-dentro">0</div><div class="l">DENTRO AHORA</div></div>
+          <div class="mini-stat"><div class="n" id="mini-sesiones">0</div><div class="l">SESIONES HOY</div></div>
+          <div class="mini-stat"><div class="n" id="mini-ultima">--:--</div><div class="l">ÚLTIMA ENTRADA</div></div>
+        </div>
+      </div>
+
+      <div class="entrada-card">
+        <h2>REGISTRAR ENTRADA</h2>
+        <label class="f-label">NÚMERO DE FICHA</label>
+        <input type="text" id="ficha-input" placeholder="00000000" inputmode="numeric" autocomplete="off">
+        <button id="btn-entrada">REGISTRAR ENTRADA</button>
+        <div class="status-msg" id="entrada-status"></div>
+      </div>
+    </div>
+
+    <h3 class="section-title">PERSONAS DENTRO DEL GIMNASIO</h3>
+    <div class="personas-grid" id="personas-grid">
+      <div class="empty-msg">No hay personas dentro del gimnasio en este momento.</div>
+    </div>
+  </section>
+
+  <!-- ============ PERSONAL ============ -->
+  <section class="panel" id="panel-personal">
+    <h3 class="section-title">CATÁLOGO DE PERSONAL</h3>
+    <div class="row" style="margin-bottom:16px;">
+      <div>
+        <label class="f-label">IMPORTAR PERSONAL DESDE EXCEL</label>
+        <input type="file" id="input-personal-excel" accept=".xlsx,.xls">
+      </div>
+      <button class="btn" id="btn-plantilla">DESCARGAR PLANTILLA DE PERSONAL</button>
+      <button class="btn danger" id="btn-borrar-personal">BORRAR CATÁLOGO</button>
+    </div>
+    <div class="row" style="margin-bottom:10px;">
+      <input type="text" id="filtro-personal" placeholder="Buscar por ficha o nombre...">
+      <span style="color:var(--fog-500); font-size:13px;" id="personal-count">0 personas registradas</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>FICHA</th><th>NOMBRE</th><th>CATEGORÍA</th><th>ÁREA</th></tr></thead>
+        <tbody id="tabla-personal"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ BITACORA ============ -->
+  <section class="panel" id="panel-bitacora">
+    <h3 class="section-title">BITÁCORA</h3>
+    <div class="filters">
+      <div>
+        <label class="f-label">FECHA</label>
+        <input type="date" id="f-fecha">
+      </div>
+      <div>
+        <label class="f-label">FICHA</label>
+        <input type="text" id="f-ficha" placeholder="Ficha">
+      </div>
+      <div>
+        <label class="f-label">NOMBRE</label>
+        <input type="text" id="f-nombre" placeholder="Nombre">
+      </div>
+      <div>
+        <label class="f-label">ESTADO</label>
+        <select id="f-estado">
+          <option value="">Todos</option>
+          <option value="ACTIVO">ACTIVO</option>
+          <option value="FINALIZADO">FINALIZADO</option>
+          <option value="TIEMPO AGOTADO">TIEMPO AGOTADO</option>
+        </select>
+      </div>
+      <button class="btn primary" id="btn-buscar">BUSCAR</button>
+      <button class="btn" id="btn-limpiar">LIMPIAR FILTROS</button>
+      <button class="btn" id="btn-exportar-excel" style="margin-left:auto;">EXPORTAR BITÁCORA A EXCEL</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>FECHA</th><th>FICHA</th><th>NOMBRE</th><th>CATEGORÍA</th><th>ÁREA</th>
+          <th>ENTRADA</th><th>SALIDA</th><th>LÍMITE</th><th>DURACIÓN</th><th>ESTADO</th>
+        </tr></thead>
+        <tbody id="tabla-bitacora"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ ESTADISTICAS ============ -->
+  <section class="panel" id="panel-estadisticas">
+    <h3 class="section-title">ESTADÍSTICAS DEL DÍA — <span id="estad-fecha"></span></h3>
+    <div class="stats-grid">
+      <div class="stat-box"><div class="n" id="st-atendidas">0</div><div class="l">PERSONAS ATENDIDAS</div></div>
+      <div class="stat-box"><div class="n" id="st-sesiones">0</div><div class="l">TOTAL DE SESIONES</div></div>
+      <div class="stat-box"><div class="n" id="st-dentro">0</div><div class="l">PERSONAS DENTRO</div></div>
+      <div class="stat-box"><div class="n" id="st-disponibles">0</div><div class="l">ESPACIOS DISPONIBLES</div></div>
+      <div class="stat-box"><div class="n" id="st-finalizadas">0</div><div class="l">SESIONES FINALIZADAS</div></div>
+      <div class="stat-box"><div class="n" id="st-agotadas">0</div><div class="l">SESIONES CON TIEMPO AGOTADO</div></div>
+      <div class="stat-box"><div class="n" id="st-promedio">0 min</div><div class="l">TIEMPO PROMEDIO DE PERMANENCIA</div></div>
+    </div>
+  </section>
+
+  <!-- ============ RESPALDO ============ -->
+  <section class="panel" id="panel-respaldo">
+    <h3 class="section-title">RESPALDO DE DATOS</h3>
+    <div class="row">
+      <button class="btn primary" id="btn-exportar-respaldo">EXPORTAR RESPALDO</button>
+      <div>
+        <label class="f-label">IMPORTAR RESPALDO</label>
+        <input type="file" id="input-respaldo" accept=".json">
+      </div>
+    </div>
+    <div class="info-block">
+      El respaldo genera un archivo JSON con el catálogo de personal, la bitácora completa,
+      las sesiones activas y la configuración de la aplicación. Guárdalo en un lugar seguro
+      y utilízalo para restaurar la información en caso de cambiar de computadora o de navegador.
+      Todos los datos se almacenan localmente en este equipo (LocalStorage) y se conservan aunque
+      cierres el navegador o apagues la computadora.
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONTROL DE GIMNASIO — lógica de la aplicación
+   Almacenamiento: LocalStorage. Exportación: SheetJS (CDN).
+   ============================================================ */
+
+const MAX_AFORO = 5;
+const LIMITE_MIN = 60;
+const KEYS = {
+  personal: 'gimnasio_personal_v1',
+  bitacora: 'gimnasio_bitacora_v1',
+  activas:  'gimnasio_activas_v1'
+};
+
+let personal = [];
+let bitacora = [];
+let activas = [];
+
+/* ---------- utilidades ---------- */
+function pad(n){ return n.toString().padStart(2,'0'); }
+function fmtFecha(d){ return pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear(); }
+function fmtFechaISO(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function fmtHora(d){ return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
+function fmtHM(d){ return pad(d.getHours())+':'+pad(d.getMinutes()); }
+function fmtDuracionMs(ms){
+  if(ms<0) ms=0;
+  const totalSeg = Math.floor(ms/1000);
+  const h = Math.floor(totalSeg/3600);
+  const m = Math.floor((totalSeg%3600)/60);
+  const s = totalSeg%60;
+  if(h>0) return `${h} h ${m} min ${s} seg`;
+  return `${m} min ${s} seg`;
+}
+function fmtCountdown(ms){
+  const neg = ms<0;
+  const abs = Math.abs(ms);
+  const totalSeg = Math.floor(abs/1000);
+  const h = Math.floor(totalSeg/3600);
+  const m = Math.floor((totalSeg%3600)/60);
+  const s = totalSeg%60;
+  return (neg?'-':'') + pad(h)+':'+pad(m)+':'+pad(s);
+}
+function normKey(k){
+  return k.toString().trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function toast(msg, type){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show'+(type?(' '+type):'');
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>{ el.className='toast'; }, 3200);
+}
+
+/* ---------- persistencia ---------- */
+function cargarDatos(){
+  try{ personal = JSON.parse(localStorage.getItem(KEYS.personal)) || []; }catch(e){ personal=[]; }
+  try{ bitacora = JSON.parse(localStorage.getItem(KEYS.bitacora)) || []; }catch(e){ bitacora=[]; }
+  try{ activas  = JSON.parse(localStorage.getItem(KEYS.activas))  || []; }catch(e){ activas=[]; }
+}
+function guardarPersonal(){ localStorage.setItem(KEYS.personal, JSON.stringify(personal)); }
+function guardarBitacora(){ localStorage.setItem(KEYS.bitacora, JSON.stringify(bitacora)); }
+function guardarActivas(){ localStorage.setItem(KEYS.activas, JSON.stringify(activas)); }
+
+/* ---------- reloj ---------- */
+function actualizarReloj(){
+  const now = new Date();
+  document.getElementById('clock-date').textContent = fmtFecha(now);
+  document.getElementById('clock-time').textContent = fmtHora(now);
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('section.panel').forEach(s=>s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-'+btn.dataset.tab).classList.add('active');
+    if(btn.dataset.tab==='bitacora') renderBitacora();
+    if(btn.dataset.tab==='estadisticas') renderEstadisticas();
+    if(btn.dataset.tab==='personal') renderPersonal();
+  });
+});
+
+/* ---------- ENTRADA ---------- */
+document.getElementById('btn-entrada').addEventListener('click', registrarEntrada);
+document.getElementById('ficha-input').addEventListener('keydown', e=>{
+  if(e.key==='Enter') registrarEntrada();
+});
+
+function mostrarEstadoEntrada(msg, tipo){
+  const el = document.getElementById('entrada-status');
+  el.textContent = msg;
+  el.className = 'status-msg show '+tipo;
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>{ el.className='status-msg'; }, 4200);
+}
+
+function registrarEntrada(){
+  const input = document.getElementById('ficha-input');
+  const ficha = input.value.trim();
+  if(!ficha){ mostrarEstadoEntrada('INGRESE UN NÚMERO DE FICHA','err'); return; }
+
+  const persona = personal.find(p=>p.ficha === ficha);
+  if(!persona){
+    mostrarEstadoEntrada('FICHA NO ENCONTRADA','err');
+    return;
+  }
+  if(activas.find(a=>a.ficha === ficha)){
+    mostrarEstadoEntrada('ESTA PERSONA YA SE ENCUENTRA DENTRO DEL GIMNASIO','err');
+    return;
+  }
+  if(activas.length >= MAX_AFORO){
+    mostrarEstadoEntrada(`AFORO COMPLETO – ${MAX_AFORO}/${MAX_AFORO}`,'err');
+    return;
+  }
+
+  const now = new Date();
+  const entradaTs = now.getTime();
+  const limiteTs = entradaTs + LIMITE_MIN*60*1000;
+  const id = uid();
+
+  activas.push({
+    id, ficha, nombre:persona.nombre, categoria:persona.categoria, area:persona.area,
+    entradaTs, limiteTs, agotado:false
+  });
+  bitacora.unshift({
+    id, fecha: fmtFecha(now), ficha, nombre:persona.nombre, categoria:persona.categoria, area:persona.area,
+    horaEntrada: fmtHora(now), horaSalida:'', horaLimite: fmtHora(new Date(limiteTs)),
+    duracion:'', estado:'ACTIVO', entradaTs, limiteTs
+  });
+  guardarActivas(); guardarBitacora();
+
+  mostrarEstadoEntrada(`ENTRADA REGISTRADA — ${persona.nombre}`,'ok');
+  input.value='';
+  input.focus();
+  renderDashboard();
+}
+
+/* ---------- SALIDA ---------- */
+function registrarSalida(id){
+  const idx = activas.findIndex(a=>a.id===id);
+  if(idx===-1) return;
+  const a = activas[idx];
+  if(!confirm('¿Desea registrar la salida de esta persona?')) return;
+
+  const now = new Date();
+  const salidaTs = now.getTime();
+  const duracionMs = salidaTs - a.entradaTs;
+  const estadoFinal = a.agotado ? 'TIEMPO AGOTADO' : 'FINALIZADO';
+
+  const reg = bitacora.find(b=>b.id===id);
+  if(reg){
+    reg.horaSalida = fmtHora(now);
+    reg.duracion = fmtDuracionMs(duracionMs);
+    reg.estado = estadoFinal;
+    reg.duracionMs = duracionMs;
+  }
+  activas.splice(idx,1);
+  guardarActivas(); guardarBitacora();
+  toast(`Salida registrada: ${a.nombre} — ${estadoFinal}`, estadoFinal==='FINALIZADO'?'ok':'err');
+  renderDashboard();
+}
+
+/* ---------- render dashboard (aforo + tarjetas) ---------- */
+function renderDashboard(){
+  const n = activas.length;
+  const disponibles = MAX_AFORO - n;
+  const countEl = document.getElementById('aforo-count');
+  countEl.textContent = `${n} / ${MAX_AFORO}`;
+  countEl.className = 'aforo-count ' + (n>=MAX_AFORO ? 'full' : (n>=MAX_AFORO-1 ? 'warn' : 'ok'));
+  document.getElementById('aforo-sub').textContent = `ESPACIOS DISPONIBLES: ${disponibles}`;
+
+  const flag = document.getElementById('aforo-flag');
+  if(n>=MAX_AFORO){
+    flag.textContent = 'AFORO COMPLETO';
+    flag.style.background = 'rgba(228,87,46,0.18)'; flag.style.color = 'var(--red-500)';
+    flag.classList.add('show');
+  } else {
+    flag.classList.remove('show');
+  }
+  document.getElementById('btn-entrada').disabled = (n>=MAX_AFORO);
+
+  const berths = document.getElementById('berths');
+  berths.innerHTML='';
+  for(let i=0;i<MAX_AFORO;i++){
+    const b = document.createElement('div');
+    b.className = 'berth' + (i<n ? (' lit'+(n>=MAX_AFORO?' full':(n>=MAX_AFORO-1?' warn':''))) : '');
+    berths.appendChild(b);
+  }
+
+  document.getElementById('mini-dentro').textContent = n;
+  const todayStr = fmtFecha(new Date());
+  const sesionesHoy = bitacora.filter(b=>b.fecha===todayStr).length;
+  document.getElementById('mini-sesiones').textContent = sesionesHoy;
+  const ultima = bitacora.filter(b=>b.fecha===todayStr).sort((x,y)=>y.entradaTs-x.entradaTs)[0];
+  document.getElementById('mini-ultima').textContent = ultima ? ultima.horaEntrada.slice(0,5) : '--:--';
+
+  renderPersonasDentro();
+}
+
+function renderPersonasDentro(){
+  const grid = document.getElementById('personas-grid');
+  if(activas.length===0){
+    grid.innerHTML = '<div class="empty-msg">No hay personas dentro del gimnasio en este momento.</div>';
+    return;
+  }
+  const now = Date.now();
+  grid.innerHTML='';
+  activas.slice().sort((a,b)=>a.entradaTs-b.entradaTs).forEach(a=>{
+    const restante = a.limiteTs - now;
+    const card = document.createElement('div');
+    let cls = 'persona-card';
+    if(restante<=0){ cls+=' agotado'; }
+    else if(restante<=5*60*1000){ cls+=' warn5'; }
+    else if(restante<=15*60*1000){ cls+=' warn15'; }
+    card.className = cls;
+    card.dataset.id = a.id;
+    card.innerHTML = `
+      <div class="p-ficha">FICHA: ${a.ficha}</div>
+      <div class="p-nombre">${a.nombre}</div>
+      <div class="p-cat">${a.categoria}${a.area?(' · '+a.area):''}</div>
+      <div class="p-times"><span>Entrada: ${fmtHora(new Date(a.entradaTs))}</span><span>Límite: ${fmtHora(new Date(a.limiteTs))}</span></div>
+      ${restante<=0 ? '<div class="p-estado-tag">TIEMPO AGOTADO</div>' : ''}
+      <div class="p-countdown-label">TIEMPO RESTANTE</div>
+      <div class="p-countdown">${fmtCountdown(restante)}</div>
+      <button class="btn-salida">REGISTRAR SALIDA</button>
+    `;
+    card.querySelector('.btn-salida').addEventListener('click', ()=>registrarSalida(a.id));
+    grid.appendChild(card);
+  });
+}
+
+/* ---------- tick cada segundo ---------- */
+function tick(){
+  actualizarReloj();
+  const now = Date.now();
+  let changed = false;
+  activas.forEach(a=>{
+    if(!a.agotado && now >= a.limiteTs){ a.agotado = true; changed = true; }
+  });
+  if(changed) guardarActivas();
+  renderPersonasDentro();
+  // update mini/aforo lightly (cheap enough to just refresh counts, not the whole dashboard controls)
+}
+/* ============================================================
+   PERSONAL
+   ============================================================ */
+document.getElementById('input-personal-excel').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(evt){
+    try{
+      const data = new Uint8Array(evt.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+      if(rows.length===0){ toast('El archivo no contiene registros.','err'); return; }
+
+      let agregados=0, actualizados=0;
+      rows.forEach(row=>{
+        const map = {};
+        Object.keys(row).forEach(k=>{ map[normKey(k)] = row[k]; });
+        const ficha = (map['FICHA']||'').toString().trim();
+        if(!ficha) return;
+        const nombre = (map['NOMBRE']||'').toString().trim();
+        const categoria = (map['CATEGORIA']||map['CATEGORÍA']||'').toString().trim();
+        const area = (map['AREA']||map['ÁREA']||'').toString().trim();
+        const existente = personal.find(p=>p.ficha===ficha);
+        if(existente){
+          existente.nombre=nombre; existente.categoria=categoria; existente.area=area;
+          actualizados++;
+        } else {
+          personal.push({ficha,nombre,categoria,area});
+          agregados++;
+        }
+      });
+      guardarPersonal();
+      renderPersonal();
+      toast(`Personal importado: ${agregados} nuevos, ${actualizados} actualizados.`,'ok');
+    }catch(err){
+      toast('No se pudo leer el archivo Excel.','err');
+    }
+    e.target.value='';
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+document.getElementById('btn-plantilla').addEventListener('click', ()=>{
+  const aoa = [
+    ['FICHA','NOMBRE','CATEGORÍA','ÁREA'],
+    ['60019120','JORGE ALBERTO PÉREZ','CABO DE MANIOBRAS','ABORDO'],
+    ['60037676','ALBERTO MÉNDEZ VÁZQUEZ','MANIOBRISTA','ABORDO']
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Personal');
+  XLSX.writeFile(wb, 'Plantilla_Personal.xlsx');
+});
+
+document.getElementById('btn-borrar-personal').addEventListener('click', ()=>{
+  if(personal.length===0){ toast('El catálogo ya está vacío.'); return; }
+  if(!confirm('¿Desea borrar por completo el catálogo de personal? Esta acción no se puede deshacer.')) return;
+  personal = [];
+  guardarPersonal();
+  renderPersonal();
+  toast('Catálogo de personal borrado.','ok');
+});
+
+document.getElementById('filtro-personal').addEventListener('input', renderPersonal);
+
+function renderPersonal(){
+  const filtro = document.getElementById('filtro-personal').value.trim().toUpperCase();
+  const tbody = document.getElementById('tabla-personal');
+  const lista = personal.filter(p=>{
+    if(!filtro) return true;
+    return p.ficha.toUpperCase().includes(filtro) || p.nombre.toUpperCase().includes(filtro);
+  }).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  document.getElementById('personal-count').textContent = `${personal.length} personas registradas`;
+  if(lista.length===0){
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fog-500); text-align:center;">Sin resultados. Importe un archivo Excel para comenzar.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = lista.map(p=>`
+    <tr><td>${p.ficha}</td><td>${p.nombre}</td><td>${p.categoria}</td><td>${p.area}</td></tr>
+  `).join('');
+}
+
+/* ============================================================
+   BITÁCORA
+   ============================================================ */
+document.getElementById('btn-buscar').addEventListener('click', renderBitacora);
+document.getElementById('btn-limpiar').addEventListener('click', ()=>{
+  document.getElementById('f-fecha').value='';
+  document.getElementById('f-ficha').value='';
+  document.getElementById('f-nombre').value='';
+  document.getElementById('f-estado').value='';
+  renderBitacora();
+});
+
+function bitacoraFiltrada(){
+  const fFecha = document.getElementById('f-fecha').value; // YYYY-MM-DD
+  const fFicha = document.getElementById('f-ficha').value.trim().toUpperCase();
+  const fNombre = document.getElementById('f-nombre').value.trim().toUpperCase();
+  const fEstado = document.getElementById('f-estado').value;
+
+  let fFechaFmt = '';
+  if(fFecha){
+    const [y,m,d] = fFecha.split('-');
+    fFechaFmt = `${d}/${m}/${y}`;
+  }
+
+  return bitacora.filter(b=>{
+    if(fFechaFmt && b.fecha!==fFechaFmt) return false;
+    if(fFicha && !b.ficha.toUpperCase().includes(fFicha)) return false;
+    if(fNombre && !b.nombre.toUpperCase().includes(fNombre)) return false;
+    if(fEstado && b.estado!==fEstado) return false;
+    return true;
+  }).sort((a,b)=>b.entradaTs-a.entradaTs);
+}
+
+function tagClase(estado){
+  if(estado==='ACTIVO') return 'ACTIVO';
+  if(estado==='FINALIZADO') return 'FINALIZADO';
+  return 'AGOTADO';
+}
+
+function renderBitacora(){
+  const lista = bitacoraFiltrada();
+  const tbody = document.getElementById('tabla-bitacora');
+  if(lista.length===0){
+    tbody.innerHTML = '<tr><td colspan="10" style="color:var(--fog-500); text-align:center;">No hay registros que coincidan con los filtros.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = lista.map(b=>`
+    <tr>
+      <td>${b.fecha}</td><td>${b.ficha}</td><td>${b.nombre}</td><td>${b.categoria}</td><td>${b.area}</td>
+      <td>${b.horaEntrada}</td><td>${b.horaSalida||'—'}</td><td>${b.horaLimite}</td>
+      <td>${b.duracion||'—'}</td>
+      <td><span class="tag ${tagClase(b.estado)}">${b.estado}</span></td>
+    </tr>
+  `).join('');
+}
+
+document.getElementById('btn-exportar-excel').addEventListener('click', ()=>{
+  const lista = bitacoraFiltrada();
+  if(lista.length===0){ toast('No hay registros para exportar.','err'); return; }
+  const aoa = [['FECHA','FICHA','NOMBRE','CATEGORÍA','ÁREA','HORA DE ENTRADA','HORA DE SALIDA','HORA LÍMITE','DURACIÓN','ESTADO']];
+  lista.slice().reverse().forEach(b=>{
+    aoa.push([b.fecha,b.ficha,b.nombre,b.categoria,b.area,b.horaEntrada,b.horaSalida,b.horaLimite,b.duracion,b.estado]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Bitacora');
+  const hoy = fmtFechaISO(new Date());
+  XLSX.writeFile(wb, `Bitacora_Gimnasio_${hoy}.xlsx`);
+});
+
+/* ============================================================
+   ESTADÍSTICAS
+   ============================================================ */
+function renderEstadisticas(){
+  const hoy = new Date();
+  const hoyStr = fmtFecha(hoy);
+  document.getElementById('estad-fecha').textContent = hoyStr;
+
+  const deHoy = bitacora.filter(b=>b.fecha===hoyStr);
+  const fichasUnicas = new Set(deHoy.map(b=>b.ficha));
+  const finalizadas = deHoy.filter(b=>b.estado==='FINALIZADO');
+  const agotadas = deHoy.filter(b=>b.estado==='TIEMPO AGOTADO');
+  const cerradas = deHoy.filter(b=>b.estado!=='ACTIVO' && typeof b.duracionMs==='number');
+  const promedioMs = cerradas.length ? (cerradas.reduce((s,b)=>s+b.duracionMs,0)/cerradas.length) : 0;
+
+  document.getElementById('st-atendidas').textContent = fichasUnicas.size;
+  document.getElementById('st-sesiones').textContent = deHoy.length;
+  document.getElementById('st-dentro').textContent = activas.length;
+  document.getElementById('st-disponibles').textContent = MAX_AFORO - activas.length;
+  document.getElementById('st-finalizadas').textContent = finalizadas.length;
+  document.getElementById('st-agotadas').textContent = agotadas.length;
+  document.getElementById('st-promedio').textContent = cerradas.length ? Math.round(promedioMs/60000)+' min' : '—';
+}
+
+/* ============================================================
+   RESPALDO
+   ============================================================ */
+document.getElementById('btn-exportar-respaldo').addEventListener('click', ()=>{
+  const respaldo = {
+    version:1,
+    exportadoEn: new Date().toISOString(),
+    personal, bitacora, activas
+  };
+  const blob = new Blob([JSON.stringify(respaldo,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const hoy = fmtFechaISO(new Date());
+  a.href = url; a.download = `Respaldo_Gimnasio_${hoy}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Respaldo exportado correctamente.','ok');
+});
+
+document.getElementById('input-respaldo').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(evt){
+    try{
+      const data = JSON.parse(evt.target.result);
+      if(!data || !Array.isArray(data.personal) || !Array.isArray(data.bitacora) || !Array.isArray(data.activas)){
+        toast('El archivo de respaldo no tiene un formato válido.','err');
+        return;
+      }
+      if(!confirm('¿Desea reemplazar todos los datos actuales (personal, bitácora y sesiones activas) con este respaldo?')) return;
+      personal = data.personal;
+      bitacora = data.bitacora;
+      activas = data.activas;
+      guardarPersonal(); guardarBitacora(); guardarActivas();
+      renderPersonal(); renderBitacora(); renderEstadisticas(); renderDashboard();
+      toast('Respaldo importado correctamente.','ok');
+    }catch(err){
+      toast('No se pudo leer el archivo de respaldo.','err');
+    }
+    e.target.value='';
+  };
+  reader.readAsText(file);
+});
+
+/* ============================================================
+   INICIO
+   ============================================================ */
+function init(){
+  cargarDatos();
+  actualizarReloj();
+  renderDashboard();
+  renderPersonal();
+  renderBitacora();
+  renderEstadisticas();
+  setInterval(tick, 1000);
+}
+init();
+</script>
+</body>
+</html>
