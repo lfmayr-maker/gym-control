@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Control de Gimnasio</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 <style>
   :root{
     --navy-950:#0A1622;
@@ -238,6 +239,7 @@
   <div class="clock">
     <div><div class="date" id="clock-date">--/--/----</div></div>
     <div class="time" id="clock-time">--:--:--</div>
+    <div id="sync-status" style="font-size:11px; letter-spacing:0.4px; color:var(--fog-500); align-self:flex-end; margin-bottom:2px;">● Cargando…</div>
   </div>
 </div>
 
@@ -247,6 +249,7 @@
   <button class="tab-btn" data-tab="bitacora">Bitácora</button>
   <button class="tab-btn" data-tab="estadisticas">Estadísticas</button>
   <button class="tab-btn" data-tab="respaldo">Respaldo</button>
+  <button class="tab-btn" data-tab="configuracion">Configuración</button>
 </div>
 
 <main>
@@ -373,8 +376,36 @@
       El respaldo genera un archivo JSON con el catálogo de personal, la bitácora completa,
       las sesiones activas y la configuración de la aplicación. Guárdalo en un lugar seguro
       y utilízalo para restaurar la información en caso de cambiar de computadora o de navegador.
-      Todos los datos se almacenan localmente en este equipo (LocalStorage) y se conservan aunque
-      cierres el navegador o apagues la computadora.
+      Los datos se guardan y se sincronizan en tiempo real a través de Supabase entre todas las
+      computadoras y celulares que abran esta aplicación. El navegador conserva además una copia
+      local (caché) para seguir mostrando información aunque se pierda la conexión a internet.
+    </div>
+  </section>
+
+  <!-- ============ CONFIGURACIÓN ============ -->
+  <section class="panel" id="panel-configuracion">
+    <h3 class="section-title">CONEXIÓN CON SUPABASE</h3>
+    <div class="info-block" style="margin-top:0; margin-bottom:16px;">
+      Pega aquí la URL y la clave pública ("anon public") de tu proyecto de Supabase.
+      Las encuentras en Supabase → ícono de engrane "Project Settings" → "API".
+      Estos datos se guardan solo en este navegador (no requieren editar el archivo HTML)
+      y se usan para conectar esta computadora o celular a tu base de datos compartida.
+      La clave "anon" es pública por diseño — no es una contraseña.
+    </div>
+    <div style="max-width:560px; display:flex; flex-direction:column; gap:14px;">
+      <div>
+        <label class="f-label">SUPABASE URL</label>
+        <input type="text" id="config-url" placeholder="https://xxxxxxxxxxx.supabase.co" style="width:100%;">
+      </div>
+      <div>
+        <label class="f-label">SUPABASE ANON KEY (clave pública)</label>
+        <input type="text" id="config-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." style="width:100%;">
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-guardar-config">GUARDAR Y CONECTAR</button>
+        <button class="btn danger" id="btn-borrar-config">DESCONECTAR (VOLVER A MODO LOCAL)</button>
+      </div>
+      <div id="config-status" style="font-size:13.5px; color:var(--fog-300);">Comprobando…</div>
     </div>
   </section>
 
@@ -385,7 +416,9 @@
 <script>
 /* ============================================================
    CONTROL DE GIMNASIO — lógica de la aplicación
-   Almacenamiento: LocalStorage. Exportación: SheetJS (CDN).
+   Fuente de datos: Supabase (tiempo real, compartida entre dispositivos).
+   LocalStorage: solo caché/respaldo temporal para lectura sin conexión.
+   Exportación: SheetJS (CDN).
    ============================================================ */
 
 const MAX_AFORO = 5;
@@ -399,6 +432,130 @@ const KEYS = {
 let personal = [];
 let bitacora = [];
 let activas = [];
+
+/* ---------- Supabase ----------
+   La configuración YA NO se edita en el código: se guarda desde la
+   pestaña "Configuración" de la app (queda en LocalStorage de este navegador).
+*/
+const CONFIG_KEYS = { url: 'gimnasio_supabase_url', key: 'gimnasio_supabase_anon_key' };
+let supabaseClient = null;
+
+function obtenerConfigGuardada(){
+  return {
+    url: localStorage.getItem(CONFIG_KEYS.url) || '',
+    key: localStorage.getItem(CONFIG_KEYS.key) || ''
+  };
+}
+
+/* Permite configurar Supabase pegando la URL y la clave directamente en la
+   barra de direcciones del navegador, para equipos donde escribir dentro
+   de los campos de la página está bloqueado (antivirus/políticas corporativas).
+   Ejemplo de uso, una sola vez por dispositivo:
+   https://tu-usuario.github.io/tu-repo/?supabase_url=https://xxxx.supabase.co&supabase_key=eyJ... */
+function aplicarConfigDesdeURL(){
+  try{
+    const params = new URLSearchParams(window.location.search);
+    const url = params.get('supabase_url');
+    const key = params.get('supabase_key');
+    if(url && key){
+      localStorage.setItem(CONFIG_KEYS.url, url.trim());
+      localStorage.setItem(CONFIG_KEYS.key, key.trim());
+      const urlLimpia = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, urlLimpia);
+      return true;
+    }
+  }catch(e){ /* silencioso: si algo falla aquí, sigue con lo que haya en caché */ }
+  return false;
+}
+
+function inicializarSupabaseClient(){
+  const cfg = obtenerConfigGuardada();
+  if(typeof supabase !== 'undefined' && cfg.url.indexOf('http') === 0 && cfg.key.length > 20){
+    supabaseClient = supabase.createClient(cfg.url, cfg.key);
+    return true;
+  }
+  supabaseClient = null;
+  return false;
+}
+aplicarConfigDesdeURL();
+inicializarSupabaseClient();
+
+function actualizarEstadoConexion(estado){
+  const el = document.getElementById('sync-status');
+  if(!el) return;
+  if(estado==='ok'){ el.textContent='● En línea — sincronizado'; el.style.color='var(--teal-500)'; }
+  else if(estado==='error'){ el.textContent='● Sin conexión — usando caché local'; el.style.color='var(--red-500)'; }
+  else { el.textContent='● Modo local (configura Supabase)'; el.style.color='var(--amber-500)'; }
+}
+
+/* ---------- mapeo entre filas de Supabase y los objetos de la app ---------- */
+function filaAPersonal(f){ return {ficha:f.ficha, nombre:f.nombre, categoria:f.categoria||'', area:f.area||''}; }
+function filaAActiva(f){
+  return {id:f.id, ficha:f.ficha, nombre:f.nombre, categoria:f.categoria||'', area:f.area||'',
+          entradaTs:Number(f.entrada_ts), limiteTs:Number(f.limite_ts)};
+}
+function filaABitacora(f){
+  return {
+    id:f.id, fecha:f.fecha, ficha:f.ficha, nombre:f.nombre, categoria:f.categoria||'', area:f.area||'',
+    horaEntrada:f.hora_entrada, horaSalida:f.hora_salida||'', horaLimite:f.hora_limite,
+    duracion:f.duracion||'', duracionMs: f.duracion_ms==null ? undefined : Number(f.duracion_ms),
+    estado:f.estado, entradaTs:Number(f.entrada_ts), limiteTs:Number(f.limite_ts)
+  };
+}
+
+/* ---------- lectura remota (Supabase) + refresco de la interfaz ---------- */
+async function refrescarPersonalRemoto(){
+  if(!supabaseClient) return;
+  const {data, error} = await supabaseClient.from('personal').select('*').order('nombre');
+  if(error){ actualizarEstadoConexion('error'); return; }
+  personal = (data||[]).map(filaAPersonal);
+  guardarPersonal();
+  renderPersonal();
+}
+async function refrescarActivasRemoto(){
+  if(!supabaseClient) return;
+  const {data, error} = await supabaseClient.from('sesiones_activas').select('*');
+  if(error){ actualizarEstadoConexion('error'); return; }
+  activas = (data||[]).map(filaAActiva);
+  guardarActivas();
+  renderDashboard();
+}
+async function refrescarBitacoraRemoto(){
+  if(!supabaseClient) return;
+  const {data, error} = await supabaseClient.from('bitacora').select('*').order('entrada_ts', {ascending:false});
+  if(error){ actualizarEstadoConexion('error'); return; }
+  bitacora = (data||[]).map(filaABitacora);
+  guardarBitacora();
+  renderBitacora();
+  renderEstadisticas();
+}
+
+async function cargarDatosIniciales(){
+  cargarCacheLocal(); // pinta de inmediato con la última copia vista (funciona offline)
+  if(!supabaseClient){
+    actualizarEstadoConexion('local');
+    return;
+  }
+  try{
+    await Promise.all([refrescarPersonalRemoto(), refrescarActivasRemoto(), refrescarBitacoraRemoto()]);
+    actualizarEstadoConexion('ok');
+  }catch(e){
+    actualizarEstadoConexion('error');
+  }
+}
+
+/* ---------- tiempo real: cualquier cambio hecho desde otro dispositivo llega aquí ---------- */
+function suscribirRealtime(){
+  if(!supabaseClient) return;
+  supabaseClient.channel('gimnasio-realtime')
+    .on('postgres_changes', {event:'*', schema:'public', table:'sesiones_activas'}, ()=>{ refrescarActivasRemoto(); })
+    .on('postgres_changes', {event:'*', schema:'public', table:'bitacora'}, ()=>{ refrescarBitacoraRemoto(); })
+    .on('postgres_changes', {event:'*', schema:'public', table:'personal'}, ()=>{ refrescarPersonalRemoto(); })
+    .subscribe(status=>{
+      if(status==='SUBSCRIBED') actualizarEstadoConexion('ok');
+      if(status==='CHANNEL_ERROR' || status==='TIMED_OUT') console.warn('Realtime no disponible:', status);
+    });
+}
 
 /* ---------- utilidades ---------- */
 function pad(n){ return n.toString().padStart(2,'0'); }
@@ -436,8 +593,8 @@ function toast(msg, type){
   el._t = setTimeout(()=>{ el.className='toast'; }, 3200);
 }
 
-/* ---------- persistencia ---------- */
-function cargarDatos(){
+/* ---------- persistencia: caché local (solo respaldo, no es la fuente principal) ---------- */
+function cargarCacheLocal(){
   try{ personal = JSON.parse(localStorage.getItem(KEYS.personal)) || []; }catch(e){ personal=[]; }
   try{ bitacora = JSON.parse(localStorage.getItem(KEYS.bitacora)) || []; }catch(e){ bitacora=[]; }
   try{ activas  = JSON.parse(localStorage.getItem(KEYS.activas))  || []; }catch(e){ activas=[]; }
@@ -463,7 +620,47 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.dataset.tab==='bitacora') renderBitacora();
     if(btn.dataset.tab==='estadisticas') renderEstadisticas();
     if(btn.dataset.tab==='personal') renderPersonal();
+    if(btn.dataset.tab==='configuracion') renderConfig();
   });
+});
+
+/* ---------- pestaña Configuración ---------- */
+function renderConfig(){
+  const cfg = obtenerConfigGuardada();
+  document.getElementById('config-url').value = cfg.url;
+  document.getElementById('config-key').value = cfg.key;
+  document.getElementById('config-status').textContent = supabaseClient
+    ? 'Conectado a Supabase. Los datos se sincronizan entre todos los dispositivos.'
+    : 'No configurado — esta computadora está usando solo almacenamiento local.';
+}
+
+document.getElementById('btn-guardar-config').addEventListener('click', async ()=>{
+  const url = document.getElementById('config-url').value.trim();
+  const key = document.getElementById('config-key').value.trim();
+  if(!url || !key){ toast('Completa la URL y la clave anon.','err'); return; }
+  if(url.indexOf('http') !== 0 || key.length <= 20){
+    toast('Revisa la URL y la clave: no tienen el formato esperado.','err');
+    return;
+  }
+  localStorage.setItem(CONFIG_KEYS.url, url);
+  localStorage.setItem(CONFIG_KEYS.key, key);
+  inicializarSupabaseClient();
+  document.getElementById('config-status').textContent = 'Conectando…';
+  await cargarDatosIniciales();
+  renderPersonal(); renderBitacora(); renderEstadisticas();
+  suscribirRealtime();
+  toast('Conectado a Supabase correctamente.','ok');
+  renderConfig();
+});
+
+document.getElementById('btn-borrar-config').addEventListener('click', ()=>{
+  if(!confirm('¿Deseas desconectar esta computadora de Supabase y volver a usar solo el almacenamiento local?')) return;
+  localStorage.removeItem(CONFIG_KEYS.url);
+  localStorage.removeItem(CONFIG_KEYS.key);
+  supabaseClient = null;
+  actualizarEstadoConexion('local');
+  toast('Desconectado. Esta computadora ahora usa solo almacenamiento local.','ok');
+  renderConfig();
 });
 
 /* ---------- ENTRADA ---------- */
@@ -480,7 +677,7 @@ function mostrarEstadoEntrada(msg, tipo){
   el._t = setTimeout(()=>{ el.className='status-msg'; }, 4200);
 }
 
-function registrarEntrada(){
+async function registrarEntrada(){
   const input = document.getElementById('ficha-input');
   const ficha = input.value.trim();
   if(!ficha){ mostrarEstadoEntrada('INGRESE UN NÚMERO DE FICHA','err'); return; }
@@ -504,15 +701,45 @@ function registrarEntrada(){
   const limiteTs = entradaTs + LIMITE_MIN*60*1000;
   const id = uid();
 
-  activas.push({
-    id, ficha, nombre:persona.nombre, categoria:persona.categoria, area:persona.area,
-    entradaTs, limiteTs, agotado:false
-  });
-  bitacora.unshift({
+  const nuevaActiva = {id, ficha, nombre:persona.nombre, categoria:persona.categoria, area:persona.area, entradaTs, limiteTs};
+  const nuevoRegistro = {
     id, fecha: fmtFecha(now), ficha, nombre:persona.nombre, categoria:persona.categoria, area:persona.area,
     horaEntrada: fmtHora(now), horaSalida:'', horaLimite: fmtHora(new Date(limiteTs)),
     duracion:'', estado:'ACTIVO', entradaTs, limiteTs
-  });
+  };
+
+  if(supabaseClient){
+    try{
+      const {error: errActiva} = await supabaseClient.from('sesiones_activas').insert({
+        id, ficha, nombre:persona.nombre, categoria:persona.categoria, area:persona.area,
+        entrada_ts: entradaTs, limite_ts: limiteTs
+      });
+      if(errActiva){
+        if(errActiva.code === '23505'){
+          mostrarEstadoEntrada('ESTA PERSONA YA SE ENCUENTRA DENTRO DEL GIMNASIO','err');
+        } else if((errActiva.message||'').indexOf('AFORO_COMPLETO') !== -1){
+          mostrarEstadoEntrada(`AFORO COMPLETO – ${MAX_AFORO}/${MAX_AFORO}`,'err');
+        } else {
+          mostrarEstadoEntrada('NO SE PUDO REGISTRAR LA ENTRADA (SIN CONEXIÓN)','err');
+        }
+        await refrescarActivasRemoto();
+        return;
+      }
+      const {error: errBita} = await supabaseClient.from('bitacora').insert({
+        id, fecha: nuevoRegistro.fecha, ficha, nombre:persona.nombre, categoria:persona.categoria, area:persona.area,
+        hora_entrada: nuevoRegistro.horaEntrada, hora_salida:'', hora_limite: nuevoRegistro.horaLimite,
+        duracion:'', estado:'ACTIVO', entrada_ts: entradaTs, limite_ts: limiteTs
+      });
+      if(errBita){ toast('Entrada registrada, pero hubo un error al guardar la bitácora.','err'); }
+    }catch(e){
+      mostrarEstadoEntrada('NO SE PUDO REGISTRAR LA ENTRADA (SIN CONEXIÓN)','err');
+      return;
+    }
+  }
+
+  // Reflejo inmediato en pantalla; Realtime confirmará/afinará en cuanto llegue el evento.
+  activas.push(nuevaActiva);
+  bitacora.unshift(nuevoRegistro);
   guardarActivas(); guardarBitacora();
 
   mostrarEstadoEntrada(`ENTRADA REGISTRADA — ${persona.nombre}`,'ok');
@@ -522,7 +749,7 @@ function registrarEntrada(){
 }
 
 /* ---------- SALIDA ---------- */
-function registrarSalida(id){
+async function registrarSalida(id){
   const idx = activas.findIndex(a=>a.id===id);
   if(idx===-1) return;
   const a = activas[idx];
@@ -531,12 +758,30 @@ function registrarSalida(id){
   const now = new Date();
   const salidaTs = now.getTime();
   const duracionMs = salidaTs - a.entradaTs;
-  const estadoFinal = a.agotado ? 'TIEMPO AGOTADO' : 'FINALIZADO';
+  const estadoFinal = (salidaTs >= a.limiteTs) ? 'TIEMPO AGOTADO' : 'FINALIZADO';
+  const horaSalida = fmtHora(now);
+  const duracionTxt = fmtDuracionMs(duracionMs);
+
+  if(supabaseClient){
+    try{
+      const {error: errUpd} = await supabaseClient.from('bitacora').update({
+        hora_salida: horaSalida, duracion: duracionTxt, duracion_ms: duracionMs, estado: estadoFinal
+      }).eq('id', id);
+      const {error: errDel} = await supabaseClient.from('sesiones_activas').delete().eq('id', id);
+      if(errUpd || errDel){
+        toast('No se pudo registrar la salida (revisa tu conexión).','err');
+        return;
+      }
+    }catch(e){
+      toast('No se pudo registrar la salida (sin conexión).','err');
+      return;
+    }
+  }
 
   const reg = bitacora.find(b=>b.id===id);
   if(reg){
-    reg.horaSalida = fmtHora(now);
-    reg.duracion = fmtDuracionMs(duracionMs);
+    reg.horaSalida = horaSalida;
+    reg.duracion = duracionTxt;
     reg.estado = estadoFinal;
     reg.duracionMs = duracionMs;
   }
@@ -630,84 +875,11 @@ function tick(){
 /* ============================================================
    PERSONAL
    ============================================================ */
-
-/* ---------- carga automática de PersonalABordo.xlsx desde GitHub Pages ---------- */
-async function cargarPersonalDesdeGitHub(){
-  const archivoExcel = './PersonalABordo.xlsx';
-
-  try{
-    toast('Cargando PersonalABordo.xlsx desde GitHub...');
-
-    const response = await fetch(archivoExcel, {cache:'no-store'});
-    if(!response.ok){
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = new Uint8Array(await response.arrayBuffer());
-    const wb = XLSX.read(data, {type:'array'});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-
-    /*
-      PersonalABordo.xlsx tiene 2 filas informativas antes de los encabezados.
-      Los encabezados reales están en la fila 3:
-      FICHA | NOMBRE | CATEGORIA | DEPTO/CIA. | AREA | ...
-
-      range: 2 hace que SheetJS use la fila 3 como encabezado.
-    */
-    const rows = XLSX.utils.sheet_to_json(ws, {
-      range: 2,
-      defval:'',
-      raw:true
-    });
-
-    if(rows.length===0){
-      toast('PersonalABordo.xlsx no contiene registros después de la fila de encabezados.','err');
-      return;
-    }
-
-    const nuevoPersonal = [];
-
-    rows.forEach(row=>{
-      const map = {};
-      Object.keys(row).forEach(k=>{ map[normKey(k)] = row[k]; });
-
-      const ficha = (map['FICHA']||'').toString().trim();
-      if(!ficha) return;
-
-      const nombre = (map['NOMBRE']||'').toString().trim();
-      const categoria = (map['CATEGORIA']||'').toString().trim();
-      const area = (map['AREA']||'').toString().trim();
-
-      nuevoPersonal.push({ficha,nombre,categoria,area});
-    });
-
-    if(nuevoPersonal.length===0){
-      toast('No se encontraron registros con FICHA en PersonalABordo.xlsx.','err');
-      return;
-    }
-
-    /*
-      El Excel publicado en GitHub es la fuente del catálogo.
-      Se reemplaza el catálogo local para que cada navegador
-      cargue la misma información al abrir el sistema.
-    */
-    personal = nuevoPersonal;
-    guardarPersonal();
-    renderPersonal();
-    renderDashboard();
-
-    toast(`PersonalABordo.xlsx cargado: ${personal.length} personas.`,'ok');
-  }catch(err){
-    console.error('Error cargando PersonalABordo.xlsx desde GitHub:', err);
-    toast(`Error al leer PersonalABordo.xlsx: ${err.message || err}`,'err');
-  }
-}
-
 document.getElementById('input-personal-excel').addEventListener('change', function(e){
   const file = e.target.files[0];
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = function(evt){
+  reader.onload = async function(evt){
     try{
       const data = new Uint8Array(evt.target.result);
       const wb = XLSX.read(data, {type:'array'});
@@ -715,27 +887,63 @@ document.getElementById('input-personal-excel').addEventListener('change', funct
       const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
       if(rows.length===0){ toast('El archivo no contiene registros.','err'); return; }
 
-      let agregados=0, actualizados=0;
+      const filas = [];
       rows.forEach(row=>{
         const map = {};
         Object.keys(row).forEach(k=>{ map[normKey(k)] = row[k]; });
         const ficha = (map['FICHA']||'').toString().trim();
         if(!ficha) return;
-        const nombre = (map['NOMBRE']||'').toString().trim();
-        const categoria = (map['CATEGORIA']||map['CATEGORÍA']||'').toString().trim();
-        const area = (map['AREA']||map['ÁREA']||'').toString().trim();
-        const existente = personal.find(p=>p.ficha===ficha);
-        if(existente){
-          existente.nombre=nombre; existente.categoria=categoria; existente.area=area;
-          actualizados++;
-        } else {
-          personal.push({ficha,nombre,categoria,area});
-          agregados++;
-        }
+        filas.push({
+          ficha,
+          nombre: (map['NOMBRE']||'').toString().trim(),
+          categoria: (map['CATEGORIA']||map['CATEGORÍA']||'').toString().trim(),
+          area: (map['AREA']||map['ÁREA']||'').toString().trim()
+        });
       });
-      guardarPersonal();
-      renderPersonal();
-      toast(`Personal importado: ${agregados} nuevos, ${actualizados} actualizados.`,'ok');
+      if(filas.length===0){ toast('El archivo no tiene fichas válidas.','err'); return; }
+
+      if(supabaseClient){
+       let errores = [];
+
+for (const fila of filas) {
+  const { error } = await supabaseClient
+    .from('personal')
+    .upsert(fila, { onConflict: 'ficha' });
+
+  if (error) {
+    console.error('Error con ficha:', fila.ficha, error);
+    errores.push(fila.ficha);
+  }
+}
+
+if (errores.length > 0) {
+  toast('No se pudieron importar algunas fichas: ' + errores.join(', '), 'err');
+  return;
+}
+
+console.log('FILAS ENVIADAS:', filas);
+console.log('RESULTADO SUPABASE:', resultado);
+console.log('ERROR SUPABASE:', error);
+
+if(error){
+  console.error('ERROR COMPLETO:', error);
+  toast('No se pudo importar a Supabase: ' + error.message,'err');
+  return;
+}
+        if(error){ toast('No se pudo importar a Supabase (revisa tu conexión).','err'); return; }
+        await refrescarPersonalRemoto();
+        toast(`Personal importado: ${filas.length} registros sincronizados.`,'ok');
+      } else {
+        let agregados=0, actualizados=0;
+        filas.forEach(f=>{
+          const existente = personal.find(p=>p.ficha===f.ficha);
+          if(existente){ Object.assign(existente,f); actualizados++; }
+          else { personal.push(f); agregados++; }
+        });
+        guardarPersonal();
+        renderPersonal();
+        toast(`Personal importado: ${agregados} nuevos, ${actualizados} actualizados.`,'ok');
+      }
     }catch(err){
       toast('No se pudo leer el archivo Excel.','err');
     }
@@ -756,12 +964,29 @@ document.getElementById('btn-plantilla').addEventListener('click', ()=>{
   XLSX.writeFile(wb, 'Plantilla_Personal.xlsx');
 });
 
-document.getElementById('btn-borrar-personal').addEventListener('click', ()=>{
+document.getElementById('btn-borrar-personal').addEventListener('click', async ()=>{
   if(personal.length===0){ toast('El catálogo ya está vacío.'); return; }
   if(!confirm('¿Desea borrar por completo el catálogo de personal? Esta acción no se puede deshacer.')) return;
-  personal = [];
-  guardarPersonal();
-  renderPersonal();
+
+ // Eliminar fichas duplicadas antes de enviar a Supabase
+const fichasUnicas = new Map();
+
+filas.forEach(f => {
+  fichasUnicas.set(f.ficha, f);
+});
+
+filas.length = 0;
+filas.push(...fichasUnicas.values());
+ console.log('DUPLICADOS:', filas.filter((f,i,a)=>a.findIndex(x=>x.ficha===f.ficha)!==i));
+if(supabaseClient){
+    const {error} = await supabaseClient.from('personal').delete().neq('ficha','');
+    if(error){ toast('No se pudo borrar el catálogo en Supabase.','err'); return; }
+    await refrescarPersonalRemoto();
+  } else {
+    personal = [];
+    guardarPersonal();
+    renderPersonal();
+  }
   toast('Catálogo de personal borrado.','ok');
 });
 
@@ -881,9 +1106,12 @@ function renderEstadisticas(){
 /* ============================================================
    RESPALDO
    ============================================================ */
-document.getElementById('btn-exportar-respaldo').addEventListener('click', ()=>{
+document.getElementById('btn-exportar-respaldo').addEventListener('click', async ()=>{
+  if(supabaseClient){
+    await Promise.all([refrescarPersonalRemoto(), refrescarActivasRemoto(), refrescarBitacoraRemoto()]);
+  }
   const respaldo = {
-    version:1,
+    version:2,
     exportadoEn: new Date().toISOString(),
     personal, bitacora, activas
   };
@@ -901,22 +1129,53 @@ document.getElementById('input-respaldo').addEventListener('change', function(e)
   const file = e.target.files[0];
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = function(evt){
+  reader.onload = async function(evt){
     try{
       const data = JSON.parse(evt.target.result);
       if(!data || !Array.isArray(data.personal) || !Array.isArray(data.bitacora) || !Array.isArray(data.activas)){
         toast('El archivo de respaldo no tiene un formato válido.','err');
         return;
       }
-      if(!confirm('¿Desea reemplazar todos los datos actuales (personal, bitácora y sesiones activas) con este respaldo?')) return;
-      personal = data.personal;
-      bitacora = data.bitacora;
-      activas = data.activas;
-      guardarPersonal(); guardarBitacora(); guardarActivas();
-      renderPersonal(); renderBitacora(); renderEstadisticas(); renderDashboard();
+      const advertencia = supabaseClient
+        ? '¿Desea reemplazar todos los datos actuales (personal, bitácora y sesiones activas) con este respaldo? Esto sobrescribirá lo que haya en Supabase para todos los dispositivos.'
+        : '¿Desea reemplazar todos los datos actuales (personal, bitácora y sesiones activas) con este respaldo?';
+      if(!confirm(advertencia)) return;
+
+      if(supabaseClient){
+        await supabaseClient.from('sesiones_activas').delete().neq('id','');
+        await supabaseClient.from('bitacora').delete().neq('id','');
+        await supabaseClient.from('personal').delete().neq('ficha','');
+
+        if(data.personal.length){
+          await supabaseClient.from('personal').upsert(data.personal.map(p=>({
+            ficha:p.ficha, nombre:p.nombre, categoria:p.categoria||'', area:p.area||''
+          })));
+        }
+        if(data.bitacora.length){
+          await supabaseClient.from('bitacora').upsert(data.bitacora.map(b=>({
+            id:b.id, fecha:b.fecha, ficha:b.ficha, nombre:b.nombre, categoria:b.categoria||'', area:b.area||'',
+            hora_entrada:b.horaEntrada, hora_salida:b.horaSalida||'', hora_limite:b.horaLimite,
+            duracion:b.duracion||'', duracion_ms:(b.duracionMs==null?null:b.duracionMs), estado:b.estado,
+            entrada_ts:b.entradaTs, limite_ts:b.limiteTs
+          })));
+        }
+        if(data.activas.length){
+          await supabaseClient.from('sesiones_activas').upsert(data.activas.map(a=>({
+            id:a.id, ficha:a.ficha, nombre:a.nombre, categoria:a.categoria||'', area:a.area||'',
+            entrada_ts:a.entradaTs, limite_ts:a.limiteTs
+          })));
+        }
+        await Promise.all([refrescarPersonalRemoto(), refrescarActivasRemoto(), refrescarBitacoraRemoto()]);
+      } else {
+        personal = data.personal;
+        bitacora = data.bitacora;
+        activas = data.activas;
+        guardarPersonal(); guardarBitacora(); guardarActivas();
+        renderPersonal(); renderBitacora(); renderEstadisticas(); renderDashboard();
+      }
       toast('Respaldo importado correctamente.','ok');
     }catch(err){
-      toast('No se pudo leer el archivo de respaldo.','err');
+      toast('No se pudo restaurar el respaldo.','err');
     }
     e.target.value='';
   };
@@ -927,16 +1186,15 @@ document.getElementById('input-respaldo').addEventListener('change', function(e)
    INICIO
    ============================================================ */
 async function init(){
-  cargarDatos();
   actualizarReloj();
+  await cargarDatosIniciales();
   renderDashboard();
   renderPersonal();
   renderBitacora();
   renderEstadisticas();
+  renderConfig();
+  suscribirRealtime();
   setInterval(tick, 1000);
-
-  // Carga automáticamente el catálogo desde PersonalABordo.xlsx publicado junto al index.html
-  await cargarPersonalDesdeGitHub();
 }
 init();
 </script>
